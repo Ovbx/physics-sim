@@ -14,13 +14,14 @@ timer = pygame.time.Clock()
 wall_thickness = 10
 gravity = 0.5
 bounce_stop = 0.3
+substeps = 4
 
 
 #track pos
 mouse_trajectory = []
 
 
-#without charge
+
 class QuadTree:
     def __init__(self, boundary, capacity = 4):
         self.boundary = boundary
@@ -28,6 +29,64 @@ class QuadTree:
         self.balls = []
         self.divided = False
         self.nw = self.ne = self.sw = self. se = None
+    
+    def contains(self, ball):
+        x, y, w, h = self.boundary
+        return (ball.x_pos >= x and ball.x_pos < x + w and ball.y_pos >= y and ball.y_pos < y + h)
+
+    
+    def subdivide(self):
+        x, y, w, h = self.boundary
+        hw = w/2 
+        hh = h/2
+        self.nw = QuadTree((x, y, hw, hh), self.capacity)
+        self.ne = QuadTree((x + hw, y, hw, hh), self.capacity)
+        self.sw = QuadTree((x, y + hh, hw, hh), self.capacity)
+        self.se = QuadTree((x + hw, y + hh, hw, hh), self.capacity)
+        self.divided = True
+    
+    def intersects(self, area):
+        x, y, w, h = self.boundary
+        rx, ry, rw, rh = area
+        return not (
+            rx > x + w or 
+            rx + rw < x or
+            ry > y + h or
+            ry + rh < y
+        )
+    def query(self, area, found=None):
+        if found is None:
+            found = []
+        if not self.intersects(area):
+            return found
+        
+        rx, ry, rw, rh = area
+        for ball in self.balls:
+            if rx <= ball.x_pos <= rx + rw and ry <= ball.y_pos <= ry + rh:
+                found.append(ball)
+        if self.divided:
+            self.nw.query(area, found)
+            self.ne.query(area, found)
+            self.sw.query(area,found)
+            self.se.query(area,found)
+        return found
+
+    def insert(self, ball):
+        #not within region
+        if not self.contains(ball):
+            return False
+        
+        #base
+        if len(self.balls) < self.capacity:
+            self.balls.append(ball)
+            return True
+        
+        #full
+        if not self.divided:
+            self.subdivide()
+
+        return (self.nw.insert(ball) or self.ne.insert(ball) or self.se.insert(ball) or self.sw.insert(ball))
+        
     
 
 
@@ -76,10 +135,10 @@ class Ball:
             self.y_speed = y_push
         return self.y_speed
     
-    def updatePos(self, mouse):
+    def updatePos(self, mouse, substeps=1):
         if not self.selected:
-            self.y_pos += self.y_speed
-            self.x_pos += self.x_speed
+            self.y_pos += self.y_speed / substeps
+            self.x_pos += self.x_speed / substeps
         else:
             self.x_pos = mouse[0]
             self.y_pos = mouse[1]
@@ -108,7 +167,43 @@ def calc_motion_vector():
         x_speed = (mouse_trajectory[-1][0] - mouse_trajectory[0][0]) / len(mouse_trajectory)
         y_speed = (mouse_trajectory[-1][1] - mouse_trajectory[0][1]) / len(mouse_trajectory)
     return x_speed, y_speed
+def resolve_collision(a,b):
+    # collision normal
+    dx = b.x_pos - a.x_pos
+    dy = b.y_pos - a.y_pos
+    dist = (dx**2 + dy**2) ** 0.5
+    if dist == 0:
+        return
+    #normalize
+    nx, ny = dx / dist, dy/dist
+    #dot product
+    aNormal = a.x_speed * nx + a.y_speed * ny
+    bNormal = b.x_speed * nx + b.y_speed * ny
 
+    
+    da = bNormal - aNormal
+    if da > 0:
+        return
+    m1, m2 = a.mass, b.mass
+    impulse = (2 * da) / (m1+m2)
+    a.x_speed += impulse * m2 * nx
+    a.y_speed += impulse * m2 * ny
+    b.x_speed -= impulse * m1 * nx
+    b.y_speed -= impulse * m1 * ny
+
+    #pushing balls apart so no overlap occurs
+    overlap = (a.radius + b.radius) - dist
+    if overlap > 0:
+        m1, m2 = a.mass, b.mass
+        total = m1 + m2
+        a.x_pos -= overlap * (m2 / total) * nx
+        a.y_pos -= overlap * (m2 / total) * ny
+        b.x_pos += overlap * (m1/total) * nx
+        b.y_pos += overlap * (m1 / total) * ny
+
+    for obj in (a, b):
+        obj.x_pos = max(obj.radius + wall_thickness/2, min(Width - obj.radius - wall_thickness/2, obj.x_pos))
+        obj.y_pos = max(obj.radius + wall_thickness/2, min(Height - obj.radius - wall_thickness/2, obj.y_pos))
 
 ball1 = Ball(50, 50, 30, 'blue', 100, .9, 0,0, 1, 0.02)
 ball2 = Ball(500, 500, 50, 'red', 300, .9, 0,0,2, 0.03)
@@ -122,27 +217,46 @@ run = True
 while run:
     timer.tick(fps)
     screen.fill('black')
+
     mouse_coords = pygame.mouse.get_pos()
     mouse_trajectory.append(mouse_coords)
     if len(mouse_trajectory) > 20:
         mouse_trajectory.pop(0)
     x_push, y_push = calc_motion_vector()
+    drawWalls()
+    for ball in balls:
+        ball.draw()
+    for ball in balls:
+        ball.y_speed = ball.checkGravity()
+    for _ in range(substeps):
+        for ball in balls:
+            ball.updatePos(mouse_coords, substeps)
+        qt = QuadTree((0,0,Width, Height))
+        for ball in balls:
+            qt.insert(ball)
+        checked = set()
+        for ball in balls:
+            r = ball.radius
+            area = (ball.x_pos - 2*r, ball.y_pos - 2*r, 4*r, 4*r)
+            near = qt.query(area)
+            for other in near:
+                if other is ball:
+                    continue
+                pair = (min(ball.id, other.id), max(ball.id, other.id))
+                if pair in checked:
+                    continue
+                checked.add(pair)
+                dx = other.x_pos - ball.x_pos
+                dy = other.y_pos - ball.y_pos
+                dist = (dx**2 + dy**2) ** 0.5
+
+                if dist < ball.radius + other.radius:
+                    resolve_collision(ball, other)
 
 
-    walls = drawWalls()
-    ball1.draw()
-    ball2.draw()
-    ball3.draw()
-    ball4.draw()
-    ball1.updatePos(mouse_coords)
-    ball2.updatePos(mouse_coords)
-    ball3.updatePos(mouse_coords)
-    ball4.updatePos(mouse_coords)
 
-    ball1.y_speed = ball1.checkGravity()
-    ball2.y_speed = ball2.checkGravity()
-    ball3.y_speed = ball3.checkGravity()
-    ball4.y_speed = ball4.checkGravity()
+
+
 
 
     for event in pygame.event.get():
