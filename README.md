@@ -1,8 +1,9 @@
 # Physics Sandbox
 
-A 2D physics sandbox built in Python and pygame. Balls fall under gravity, bounce off the walls, slide to a stop with friction, and can be grabbed and flung with the mouse. A quadtree spatial structure keeps collision detection fast as the number of balls grows (not implemented yet).
+A 2D physics sandbox built in Python and pygame. Balls fall under gravity, bounce off the walls, slide to a stop with friction, and can be grabbed and flung with the mouse. A quadtree spatial structure keeps collision detection fast as the number of balls grows.
 
-<img width="1006" height="822" alt="demo" src="https://github.com/user-attachments/assets/e9afbd8a-ace9-4d5a-b7e7-8aa01b39407e" />
+<img width="1006" height="828" alt="demo2" src="https://github.com/user-attachments/assets/9b60d438-39cd-4d05-a27f-4e8743f8e952" />
+
 
 
 
@@ -29,9 +30,9 @@ python Engine.py
 - pygame
 
 ## Roadmap
-- [ ] finish the quadtree based collision
-- [ ] varied ball sizes
-- [ ] momentum conserving collision response
+- [x] finish the quadtree based collision
+- [x] varied ball sizes
+- [x] momentum conserving collision response
 
 ## LICENSE 
 Released under MIT license
